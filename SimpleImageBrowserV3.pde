@@ -8,9 +8,21 @@
  Description: Application uses getures with the Ketai library
  *************************************************/
 
-// add Ketai library
-import ketai.ui.*; 
+// KETAI
+import ketai.net.nfc.record.*;
+import ketai.camera.*;
+import ketai.net.*;
+import ketai.ui.*;
+import ketai.cv.facedetector.*;
+import ketai.sensors.*;
+import ketai.net.nfc.*;
+import ketai.net.wifidirect.*;
+import ketai.data.*;
+import ketai.net.bluetooth.*;
 
+import android.view.MotionEvent;
+
+// add to load images
 import android.content.res.AssetManager;
 
 // add from whsu for soundPool
@@ -30,10 +42,12 @@ import java.util.Arrays;
 import java.io.*;
 import android.os.Environment;
 
+
 // added - container and two buttons
 APWidgetContainer widgetContainer; 
 APButton button1;
 APButton button2;
+APButton button3; 
 
 // textField object
 APEditText textField;
@@ -74,10 +88,22 @@ PImage arrowR;
 PImage arrowL;
 PImage[] images;
 
+boolean isKeyboardVisible; 
+boolean zoomIsTrue; 
 
 int[] currentThumbnails = {
   0, 1, 2, 3, 4
 };
+
+// KETAI
+KetaiGesture gesture;
+float Size = 10;
+float Angle = 0;
+PImage img;
+ArrayList<Thing> things = new ArrayList<Thing>();
+float translateX=0, translateY=0;
+float prevPinchX = -1, prevPinchY = -1;
+int prevPinchFrame = -1;
 
 
 void setup() {
@@ -85,8 +111,6 @@ void setup() {
   // left and right arrows 
   arrowR = loadImage("right.png"); 
   arrowL = loadImage("left.png");
-
-  //textField.setImeOptions(EditorInfo.IME_FLAG_NO_EXTRACT_UI);
 
   section = displayWidth/5;
   leftMost = 0; 
@@ -96,7 +120,14 @@ void setup() {
   soundSetup();
   widgetSetup();
   textSize(50);
+  textField.setImeOptions(EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+
+  // KETAI
+  gesture = new KetaiGesture(this);
 } // end setup()
+
+
+
 
 void loadText() {
   if (mode == 1) {
@@ -169,12 +200,14 @@ void widgetSetup() {
   widgetContainer = new APWidgetContainer(this); //create new container for widgets
   button1 = new APButton( displayWidth - 160, 150, 400, 100, "save"); //create new button from x- and y-pos. and label. size determined by text content
   button2 = new APButton( displayWidth - 160, 260, 400, 100, "cancel"); //create new button from x- and y-pos., width, height and label
+  button3 = new APButton( displayWidth - 160, 370, 400, 100, "zoom"); //create new button from x- and y-pos., width, height and label
+
   widgetContainer.addWidget(button1); //place button in container
   widgetContainer.addWidget(button2); //place button in container
+  widgetContainer.addWidget(button3); //place button in container
 
   // text edit widget
-
-  textField = new APEditText( displayWidth-300, 20, // top right corner at (0, 50)
+  textField = new APEditText( displayWidth/2 - 50, 20, // top right corner at (0, 50)
   width/2, 100 );     // width = width/2, height = 100
   widgetContainer.addWidget(textField); //place textField in container
   widgetContainer.hide();
@@ -183,15 +216,21 @@ void widgetSetup() {
 }
 
 
-////onClickWidget is called when a widget is clicked/touched
+//onClickWidget is called when a widget is clicked/touched
 void onClickWidget(APWidget widget) {
-  if (mode == 1) {
-    // we're going to change this to save and read sooner or later
-    if (widget == button1) { //if it was button1 that was clicked
-      saveToFile();
-    } else if (widget == button2) { //or if it was button2
-      hideVirtualKeyboard();
-    }
+  if (widget == button1 ) {
+    saveToFile();
+  }
+  // check if keyboard is visible to prevent the cancel button to activate the keyboard
+  if (widget == button2) {
+    hideVirtualKeyboard();
+  }
+  if (widget == textField && isKeyboardVisible == false) {
+    showVirtualKeyboard();
+  }
+  if (widget == button3) {
+    zoomIsTrue = true; 
+    zoomMode();
   }
 }
 
@@ -224,14 +263,213 @@ void loadImgs() {
 
 void draw() {
 
-  background(0);                                              // background color = white
+  background(0);                                              
   image(arrowR, displayWidth-100, displayHeight-100, 200, 200); // left arrow
   image(arrowL, 100, displayHeight-100, 200, 200);              // right arrow
   imageMode(CENTER); 
   displayImage();
-
   loadText();
-} // end draw()
+  goDouble();
+}
+
+// ALL KETAI!
+
+void goDouble() {
+  if (things.size() > 0)
+    for (int i = things.size ()-1; i >= 0; i--)
+    {
+      Thing t = things.get(i);
+      if (t.isDead())
+        things.remove(t);
+      else
+        t.draw();
+    }
+}
+
+
+void onDoubleTap() {
+  //things.add(new Thing("DOUBLE", 1.1, 1.1));
+  // println("I'd tap that twice");
+}
+
+
+
+void onDoubleTap(float x, float y)
+{
+  things.add(new Thing(x, y));
+  if (mode == 0) {
+    if ((mouseY > (displayHeight/2-100)) && (mouseY < (displayHeight/2+100))) {
+      currentImg = leftMost; 
+
+      if (mouseX > 0 && mouseX < section) {
+        mode = 1;
+        widgetContainer.show();
+
+        println("section 1");
+        // plays the sound  
+        soundPool.play(sound1, 2, 2, 0, 0, 1);
+      } else if ( mouseX > section && mouseX < section*2 ) {
+        currentImg = currentImg + 1;
+        if (currentImg > images.length - 1) {
+          currentImg = currentImg - images.length;
+        }
+        mode = 1;
+        widgetContainer.show();
+
+        println("section 2");
+        // plays the sound  
+        soundPool.play(sound1, 2, 2, 0, 0, 1);
+      } else if ( mouseX > section*2 && mouseX < section*3 ) {
+        currentImg = currentImg + 2;
+        if (currentImg > images.length - 1) {
+          currentImg = currentImg - images.length;
+        }
+        mode = 1;
+        widgetContainer.show();
+
+        println("section 3");
+        // plays the sound  
+        soundPool.play(sound1, 2, 2, 0, 0, 1);
+      } else if ( mouseX > section*3 && mouseX < section*4 ) {
+        currentImg = currentImg + 3;
+        if (currentImg > images.length - 1) {
+          currentImg = currentImg - images.length;
+        }
+        mode = 1;
+        widgetContainer.show();
+
+        println("section 4");
+        // plays the sound  
+        soundPool.play(sound1, 2, 2, 0, 0, 1);
+      } else if ( mouseX > section*4 && mouseX < section*5 ) {
+        currentImg = currentImg + 4; 
+        if (currentImg > images.length - 1) {
+          currentImg = currentImg - images.length;
+        }
+        mode = 1; 
+        widgetContainer.show();
+
+        println("section 5");
+        // plays the sound  
+        soundPool.play(sound1, 2, 2, 0, 0, 1);
+      }
+    }
+  } else if (mode == 1) {
+    float posW = (width - thumbWidth) / 2;
+    float posH = (height - thumbHeight) / 2;
+    if ( (mouseX >= posW) && (mouseX < (width - posW)) &&
+      (mouseY >= posH) && (mouseY < (height - posH))) {
+
+
+      widgetContainer.hide();
+      hideVirtualKeyboard();
+
+      mode = 0; 
+      leftMost = currentImg - 2; 
+      println(currentImg); 
+      soundPool.play(sound4, 1, 1, 0, 0, 1);
+
+      if (leftMost < 2) {
+        if ( currentImg == 0) {
+          leftMost = images.length - 2;
+        } else if (currentImg == 1) {
+          leftMost = images.length - 1;
+        }
+      }
+    }
+  }
+}
+
+// NEEDS TO BE EDITED
+void onFlick( float x, float y, float px, float py, float v)
+{
+//  things.add(new Thing("FLICK:"+v, x, y, px, py));
+//  println("x: " + x);
+//  println("y: " + y);
+//  println("px: " + px);
+//  println("py: " + py);
+  if (mode == 1) {
+
+    if ((px < x) ) {
+      // NEED A SWIPE LEFT
+      print("left");
+      soundPool.play(soundLeft, 1, 1, 0, 0, 1);
+      currentImg--;
+      velX = -50;
+
+      if ( currentImg < 0 ) {
+        currentImg = totalFrames - 1;
+      }
+      println("current image: " + currentImg);
+      
+      
+    } else if ((px > x)) {
+
+      // NEED A SWIPE RIGHT
+      print("right"); 
+      soundPool.play(soundRight, 1, 1, 0, 0, 1);
+
+      currentImg++;
+      velX = 50;
+      if (currentImg > totalFrames - 1) {
+        currentImg = 0;
+      }
+      println("current image: " + currentImg);
+    }
+  } else if (mode == 0) {
+
+    if (px > x) {
+
+      println("right");
+      soundPool.play(sound5, 1, 1, 0, 0, 1);
+
+      velX = 250;     
+      leftMost = leftMost + 5;
+      currentImg += 5;
+
+      if (leftMost > images.length - 1) {
+        leftMost = leftMost - images.length;
+      }
+      if (currentImg > images.length - 1) {
+        currentImg = currentImg - images.length;
+      }
+
+      // if the left arrow is clicked
+    } else if (px < x) {
+
+      print("left");
+      soundPool.play(sound5, 1, 1, 0, 0, 1);
+
+      velX = -250; 
+
+      leftMost = leftMost - 5;
+      currentImg -= 5;
+
+      if (leftMost < 0) {
+        leftMost = images.length + leftMost;
+      }
+      if (currentImg < 0) {
+        currentImg = images.length + currentImg;
+      }
+    }
+  }
+}
+
+// more boilder plate code
+public boolean surfaceTouchEvent(MotionEvent event) {
+
+  //call to keep mouseX, mouseY, etc updated
+  super.surfaceTouchEvent(event);
+
+  //forward event to class for processing
+  return gesture.surfaceTouchEvent(event);
+}
+
+
+// END ALL KETAI
+
+
+
 
 
 void mousePressed() {
@@ -249,14 +487,17 @@ void mousePressed() {
 
 
 // boilder plate code to show and hide virtual keyboard on click 
+
 void showVirtualKeyboard() {
   InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
   imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0);
+  isKeyboardVisible = true;
 }
 
 void hideVirtualKeyboard() {
   InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
   imm.toggleSoftInput(InputMethodManager.HIDE_IMPLICIT_ONLY, 0);
+  isKeyboardVisible = false;
 }
 
 
@@ -264,155 +505,19 @@ void hideVirtualKeyboard() {
 void modeZero() {
 
   // if the right arrow is clicked
-  if ((mouseX <= displayWidth ) && (mouseX >= displayWidth-200) &&
-    (mouseY >=  displayHeight-200)) {
-
-
-    println("right");
-    soundPool.play(sound5, 1, 1, 0, 0, 1);
-
-    velX = 250;     
-    leftMost = leftMost + 5;
-    currentImg += 5;
-
-    if (leftMost > images.length - 1) {
-      leftMost = leftMost - images.length;
-    }
-    if (currentImg > images.length - 1) {
-      currentImg = currentImg - images.length;
-    }
-
-    // if the left arrow is clicked
-  } else if ((mouseX <= 200) && (mouseX >= 0) && (mouseY >= displayHeight-200)) { // left arrow
-
-    print("left");
-    soundPool.play(sound5, 1, 1, 0, 0, 1);
-
-    velX = -250; 
-
-    leftMost = leftMost - 5;
-    currentImg -= 5;
-
-    if (leftMost < 0) {
-      leftMost = images.length + leftMost;
-    }
-    if (currentImg < 0) {
-      currentImg = images.length + currentImg;
-    }
-  }
-
-
-  // if the images are in the middle
-  if ((mouseY > (displayHeight/2-100)) && (mouseY < (displayHeight/2+100))) {
-    currentImg = leftMost; 
-
-    if (mouseX > 0 && mouseX < section) {
-      mode = 1;
-
-      widgetContainer.show();
-
-      println("section 1");
-      // plays the sound  
-      soundPool.play(sound1, 2, 2, 0, 0, 1);
-    } else if ( mouseX > section && mouseX < section*2 ) {
-      currentImg = currentImg + 1;
-      if (currentImg > images.length - 1) {
-        currentImg = currentImg - images.length;
-      }
-      mode = 1;
-      widgetContainer.show();
-
-      println("section 2");
-      // plays the sound  
-      soundPool.play(sound1, 2, 2, 0, 0, 1);
-    } else if ( mouseX > section*2 && mouseX < section*3 ) {
-      currentImg = currentImg + 2;
-      if (currentImg > images.length - 1) {
-        currentImg = currentImg - images.length;
-      }
-      mode = 1;
-      widgetContainer.show();
-
-      println("section 3");
-      // plays the sound  
-      soundPool.play(sound1, 2, 2, 0, 0, 1);
-    } else if ( mouseX > section*3 && mouseX < section*4 ) {
-      currentImg = currentImg + 3;
-      if (currentImg > images.length - 1) {
-        currentImg = currentImg - images.length;
-      }
-      mode = 1;
-      widgetContainer.show();
-
-      println("section 4");
-      // plays the sound  
-      soundPool.play(sound1, 2, 2, 0, 0, 1);
-    } else if ( mouseX > section*4 && mouseX < section*5 ) {
-      currentImg = currentImg + 4; 
-      if (currentImg > images.length - 1) {
-        currentImg = currentImg - images.length;
-      }
-      mode = 1; 
-      widgetContainer.show();
-
-      println("section 5");
-      // plays the sound  
-      soundPool.play(sound1, 2, 2, 0, 0, 1);
-    }
-  }
 } // end modeZero
 
 
 
 
-// single image mode
+// single image mode - NO LONGER NEEDED
 void modeOne() {
-  if (mode == 1)
+}
 
-    if (((mouseX < 200) && (mouseY > 530))) {
-      print("left");
-      soundPool.play(soundLeft, 1, 1, 0, 0, 1);
-      currentImg--;
-      velX = -50;
-
-      if ( currentImg < 0 ) {
-        currentImg = totalFrames - 1;
-      }
-      println("current image: " + currentImg);
-    } else if ((mouseX > 1070) && (mouseY > 530)) {
-      print("right"); 
-      soundPool.play(soundRight, 1, 1, 0, 0, 1);
-
-      currentImg++;
-      velX = 50;
-      if (currentImg > totalFrames - 1) {
-        currentImg = 0;
-      }
-      println("current image: " + currentImg);
-    }
-
-  // user clicks on current image in MODE 1
-  float posW = (width - thumbWidth) / 2;
-  float posH = (height - thumbHeight) / 2;
-  if ( (mouseX >= posW) && (mouseX < (width - posW)) &&
-    (mouseY >= posH) && (mouseY < (height - posH))) {
-
-
-    widgetContainer.hide();
-    hideVirtualKeyboard();
-
-    mode = 0; 
-    leftMost = currentImg - 2; 
-    println(currentImg); 
-    soundPool.play(sound4, 1, 1, 0, 0, 1);
-
-    if (leftMost < 2) {
-      if ( currentImg == 0) {
-        leftMost = images.length - 2;
-      } else if (currentImg == 1) {
-        leftMost = images.length - 1;
-      }
-    }
+void zoomMode() {
+  if (zoomIsTrue == true) {
+    println("Zoom button is good to go"); 
+  } else {
   }
 }
 
@@ -480,7 +585,7 @@ void displayImage() {
       direction = 0;
     }
 
-    int original = currentImg + direction;//Original image
+    int original = currentImg + direction; //Original image
     if (original > images.length-1) {
       original = 0;
     } else if (original < 0) {
@@ -533,14 +638,14 @@ void resizeImage(PImage image) {
 
   if (mode == 1) {
     if (thumbRatio > imageRatio) {
-      thumbHeight = height-100;
-      thumbWidth = (height) * imageRatio;
+      thumbHeight = height-300;
+      thumbWidth = (height - 300) * imageRatio;
     } else if (thumbRatio < imageRatio) {
-      thumbHeight = (width - 600) * (1/imageRatio);
-      thumbWidth = width - 600;
+      thumbHeight = (width - 700) * (1/imageRatio);
+      thumbWidth = width - 700;
     } else {
-      thumbHeight = height - 100;
-      thumbWidth = width/2;
+      thumbHeight = height - 300;
+      thumbWidth = width/2 - 200;
     }
   } else if (mode == 0) {
     if (thumbRatio > imageRatio) {
